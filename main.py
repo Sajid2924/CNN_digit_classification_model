@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import Dataset , DataLoader
 import torch.nn as nn
 import torch.optim as optim
+import optuna
 torch.manual_seed(42)
 
 # taking data from mnist dataset
@@ -42,76 +43,134 @@ class CustomDataset(Dataset):
 train_dataset = CustomDataset(x_train , y_train)
 test_dataset = CustomDataset(x_test , y_test)
 
-# data loading in batches
-train_loader = DataLoader(train_dataset , batch_size=32 , shuffle=True)
-test_loader = DataLoader(test_dataset , batch_size= 32 , shuffle=False)
-
 # model class
 class MyNN(nn.Module):
-    def __init__(self,input=1):
+    def __init__(self, input, num_hidden ,num_neuron , num_filters , dropout_rate , num_pairs):
         super().__init__()
 
-        self.features = nn.Sequential(
-            nn.Conv2d(input,32,kernel_size=3,padding='same'),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2,stride=2),
-            nn.Conv2d(32,64,kernel_size=3,padding='same'),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2,stride=2)
-        )
+        layers1 = []
+
+        for i in range(num_pairs):
+            layers1.append(nn.Conv2d(input , num_filters , kernel_size=3 , padding='same'))
+            layers1.append(nn.ReLU())
+            layers1.append(nn.MaxPool2d(kernel_size=2 , stride=2))
+            input = num_filters
+            num_filters = num_filters*2
         
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64*7*7 , 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(p=0.3),
-            nn.Linear(128,64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(p=0.3),
-            nn.Linear(64,10)
-        )
+        self.features = nn.Sequential(*layers1)
+
+        num_filters = num_filters//2
+        h=28
+        for k in range(num_pairs): h=h//2
+        inp = num_filters*h*h
+        # self.features = nn.Sequential(
+        #     nn.Conv2d(input,32,kernel_size=3,padding='same'),
+        #     nn.ReLU(),
+        #     nn.MaxPool2d(kernel_size=2,stride=2),
+        #     nn.Conv2d(32,64,kernel_size=3,padding='same'),
+        #     nn.ReLU(),
+        #     nn.MaxPool2d(kernel_size=2,stride=2)
+        # )
+        
+        layers2 = []
+        layers2.append(nn.Flatten())
+
+        for i in range(num_hidden):
+            layers2.append(nn.Linear(inp , num_neuron ))
+            layers2.append(nn.BatchNorm1d(num_neuron))
+            layers2.append(nn.ReLU())
+            layers2.append(nn.Dropout(dropout_rate))
+            inp=num_neuron
+
+        layers2.append(nn.Linear(num_neuron,10))
+
+        self.classifier = nn.Sequential(*layers2)
+        # self.classifier = nn.Sequential(
+        #     nn.Flatten(),
+        #     nn.Linear(64*7*7 , 128),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=0.3),
+        #     nn.Linear(128,64),
+        #     nn.BatchNorm1d(64),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=0.3),
+        #     nn.Linear(64,10)
+        # )
     
     def forward(self,x):
         x=self.features(x)
         x=self.classifier(x)
         return x
 
-epochs = 20
-lr = 0.01
-model = MyNN()
-criterion = nn.CrossEntropyLoss()                                        #loss function
-optimizer = optim.SGD(model.parameters(),lr , weight_decay=1e-4)         #optimizer i.e. weight and bias updator
-
-# training loop
-for epoch in range(epochs):
-    total_loss = 0
-    for batch_features , batch_labels in train_loader:
-        outputs = model(batch_features)
-        loss = criterion(outputs , batch_labels)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    print("epoch :", epoch+1 , "--- loss :" , total_loss)
-
-avg_loss = total_loss / len(train_loader)
-print("avg loss :", avg_loss)
 
 
-# evaluation
-model.eval()
-total = 0
-correct = 0
+def objective(trial):
+    num_hidden = trial.suggest_int('num_hidden' , 1,5)
+    num_neuron = trial.suggest_int('num_neuron', 8, 128, step=8)
+    epochs = trial.suggest_int('epochs' , 10 , 30 , step=5)
+    lr = trial.suggest_float('lr', 1e-5 , 1e-1 , log=True)
+    dropout_rate = trial.suggest_float('dropout_rate' , 0.1 , 0.5 , step=0.1)
+    batch_size = trial.suggest_categorical('batch_size' , [16,32,64,128])
+    optimizer_name = trial.suggest_categorical('optimizer_name' , ['ADAM' , 'SGD' , 'RMSprop'])
+    weight_decay = trial.suggest_float('weight_decay' , 1e-5 , 1e-2 , log=True)
+    num_filters = trial.suggest_categorical('num_filters' , [8,16,32,64,128])
+    num_pairs = trial.suggest_int('num_pairs' , 1,4)
 
-with torch.no_grad():
-    for batch_features , batch_labels in test_loader:
-        outputs=model(batch_features)
-        _,predicted = torch.max(outputs , 1)
 
-        total += batch_labels.shape[0]
-        correct += (predicted == batch_labels).sum().item()
+    train_loader = DataLoader(train_dataset , batch_size=batch_size , shuffle=True)
+    test_loader = DataLoader(test_dataset , batch_size= batch_size , shuffle=False)
 
-accuracy = correct/total
-print("accuracy :", accuracy*100 , "%")
+
+    model = MyNN(1 , num_hidden ,num_neuron , num_filters , dropout_rate , num_pairs)
+    #loss function;
+    criterion = nn.CrossEntropyLoss()
+
+    #optimizer i.e. weight and bias updator
+    if optimizer_name=='ADAM':
+        optimizer = optim.Adam(model.parameters(),lr=lr , weight_decay=weight_decay)
+    elif optimizer_name=='SGD':
+        optimizer = optim.SGD(model.parameters(),lr = lr , weight_decay=weight_decay)
+    else:
+        optimizer = optim.RMSprop(model.parameters(),lr =lr , weight_decay=weight_decay)
+
+
+    # training loop
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        for batch_features , batch_labels in train_loader:
+            outputs = model(batch_features)
+            loss = criterion(outputs , batch_labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        # print("epoch :", epoch+1 , "--- loss :" , total_loss)
+
+    avg_loss = total_loss / len(train_loader)
+    # print("avg loss :", avg_loss)
+
+
+    # evaluation
+    model.eval()
+    total = 0
+    correct = 0
+
+    with torch.no_grad():
+        for batch_features , batch_labels in test_loader:
+            outputs=model(batch_features)
+            _,predicted = torch.max(outputs , 1)
+
+            total += batch_labels.shape[0]
+            correct += (predicted == batch_labels).sum().item()
+
+    accuracy = correct/total
+    return accuracy
+
+
+study = optuna.create_study(direction = 'maximize')
+study.optimize(objective , n_trials=10)
+
+print("accuracy :" , study.best_value)
+print("best accuracy achieved for parameters : " , study.best_params)
