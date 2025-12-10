@@ -63,9 +63,13 @@ class MyNN(nn.Module):
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(64*7*7 , 128),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
+            nn.Dropout(p=0.3),
             nn.Linear(128,64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
+            nn.Dropout(p=0.3),
             nn.Linear(64,10)
         )
     
@@ -77,8 +81,8 @@ class MyNN(nn.Module):
 epochs = 20
 lr = 0.01
 model = MyNN()
-criterion = nn.CrossEntropyLoss()                    #loss function
-optimizer = optim.SGD(model.parameters(),lr)         #optimizer i.e. weight and bias updator
+criterion = nn.CrossEntropyLoss()                                        #loss function
+optimizer = optim.SGD(model.parameters(),lr , weight_decay=1e-4)         #optimizer i.e. weight and bias updator
 
 # training loop
 for epoch in range(epochs):
