@@ -1,3 +1,8 @@
+"""
+Hyperparameter tuning of CNN using Optuna.
+Explores architecture depth, learning rate, optimizer, and regularization.
+"""
+
 from torchvision import datasets
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -63,14 +68,6 @@ class MyNN(nn.Module):
         h=28
         for k in range(num_pairs): h=h//2
         inp = num_filters*h*h
-        # self.features = nn.Sequential(
-        #     nn.Conv2d(input,32,kernel_size=3,padding='same'),
-        #     nn.ReLU(),
-        #     nn.MaxPool2d(kernel_size=2,stride=2),
-        #     nn.Conv2d(32,64,kernel_size=3,padding='same'),
-        #     nn.ReLU(),
-        #     nn.MaxPool2d(kernel_size=2,stride=2)
-        # )
         
         layers2 = []
         layers2.append(nn.Flatten())
@@ -85,18 +82,6 @@ class MyNN(nn.Module):
         layers2.append(nn.Linear(num_neuron,10))
 
         self.classifier = nn.Sequential(*layers2)
-        # self.classifier = nn.Sequential(
-        #     nn.Flatten(),
-        #     nn.Linear(64*7*7 , 128),
-        #     nn.BatchNorm1d(128),
-        #     nn.ReLU(),
-        #     nn.Dropout(p=0.3),
-        #     nn.Linear(128,64),
-        #     nn.BatchNorm1d(64),
-        #     nn.ReLU(),
-        #     nn.Dropout(p=0.3),
-        #     nn.Linear(64,10)
-        # )
     
     def forward(self,x):
         x=self.features(x)
@@ -146,10 +131,10 @@ def objective(trial):
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        # print("epoch :", epoch+1 , "--- loss :" , total_loss)
+        print("epoch :", epoch+1 , "--- loss :" , total_loss)
 
     avg_loss = total_loss / len(train_loader)
-    # print("avg loss :", avg_loss)
+    print("avg loss :", avg_loss)
 
 
     # evaluation
@@ -174,3 +159,19 @@ study.optimize(objective , n_trials=10)
 
 print("accuracy :" , study.best_value)
 print("best accuracy achieved for parameters : " , study.best_params)
+
+#--------------OUTPUT-------------------
+
+# accuracy : 0.9925
+# best accuracy achieved for parameters :  {
+#     'num_hidden': 1, 
+#     'num_neuron': 112, 
+#     'epochs': 15, 
+#     'lr': 7.504712151350896e-05, 
+#     'dropout_rate': 0.2, 
+#     'batch_size': 32, 
+#     'optimizer_name': 'ADAM', 
+#     'weight_decay': 1.2697984884583028e-05, 
+#     'num_filters': 32, 
+#     'num_pairs': 3
+#     }
